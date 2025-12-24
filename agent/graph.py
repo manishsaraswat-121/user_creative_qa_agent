@@ -1,5 +1,7 @@
 import os
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph
@@ -33,18 +35,38 @@ CREATIVE_KEYWORDS = [
     "creative", "ad", "promo", "design", "image", "text", "message", "clarity", "cta"
 ]
 
+
+logger = logging.getLogger("creative-qa-agent.agent")
+
 def get_llm():
     """
     Initialize and return a ChatOpenAI LLM instance using OpenRouter.
+    Loads the API key from environment or .env.sample file.
+    Handles cases when main.py and graph.py are in different directories.
     """
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    # Determine project root (assuming main.py is at root)
+    project_root = Path(__file__).parent.parent  # agent/graph.py -> project root
+    env_path = project_root / ".env.sample"       # explicit .env.sample path
+
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+        logger.info(f".env.sample loaded from {env_path}")
+    else:
+        logger.warning(f"No .env.sample file found at {env_path}")
+
+    # Fetch API key from environment variables
+    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+
     if not api_key:
-        logger.warning("OPENROUTER_API_KEY not set. LLM calls may fail.")
+        logger.error("No API key found! Set OPENROUTER_API_KEY in .env.sample or environment.")
+        raise ValueError("OPENROUTER_API_KEY or OPENAI_API_KEY is required")
+
     return ChatOpenAI(
         model="openai/gpt-4o-mini",
         openai_api_key=api_key,
         openai_api_base="https://openrouter.ai/api/v1"
     )
+
 
 def run_agent(user_id: str, user_query: str) -> str:
     """
