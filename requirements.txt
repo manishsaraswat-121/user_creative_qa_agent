@@ -1,0 +1,17 @@
+# --- Web framework ---
+fastapi>=0.110.0
+uvicorn>=0.23.0
+python-dotenv>=1.0.0
+
+# --- LangChain ecosystem (COMPATIBLE SET) ---
+langchain>=0.2.6
+langchain-core>=0.2.38
+langchain-community>=0.2.6
+langchain-openai>=0.1.6
+langgraph>=0.0.48
+
+# --- LLM / OpenRouter ---
+openai>=1.30.0
+
+# --- Validation ---
+pydantic>=2.5.3

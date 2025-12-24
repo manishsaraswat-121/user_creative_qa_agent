@@ -1,0 +1,59 @@
+# =========================
+# Python cache & artifacts
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# =========================
+# Virtual environments
+# =========================
+venv/
+env/
+.env
+.env.sample
+.env.*
+.env.local
+
+# =========================
+# OS-generated files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# IDE / Editor settings
+# =========================
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# Test & coverage artifacts
+# =========================
+.coverage
+pytest_cache/
+htmlcov/
+
+# =========================
+# Build / distribution
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# Archives
+# =========================
+*.zip
+*.tar
+*.gz
