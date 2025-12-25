@@ -1,164 +1,209 @@
-# User-Scoped Creative Q&A Agent
+# User‑Scoped AI‑Powered Creative Q&A Agent
 
 ## Overview
 
-This project implements a **User-Scoped AI-powered Creative Q&A Agent** using FastAPI, LangGraph, and OpenRouter-compatible LLMs. The agent helps users ask questions about *their own marketing creatives* while strictly enforcing privacy, safety, and execution constraints defined in the assignment.
+This project implements a **user‑scoped AI Q&A agent** that allows users to ask questions strictly about **their own creatives** (text or media). It is built as a **FastAPI service** using **LangChain + LangGraph** with controlled tool calling.
 
-The service is designed to run with a **single command**:
-
-```bash
-python main.py
-```
-
-No setup scripts, no manual configuration, and no hidden runtime dependencies.
+The system enforces strict privacy, safety, and execution guarantees as required by the assignment.
 
 ---
 
-## Key Guarantees (Mandatory Compliance)
+## Architecture (Enterprise SOP View)
 
-### 🛡 1. Cross-User Data Access Prevention
+Client → FastAPI API Layer → LangGraph Agent → Tools → LLM (OpenRouter / OpenAI)
 
-All creative data access is **strictly user-scoped**.
-
-* Every request must include an `X-USER-ID` header
-* The backend fetches creatives **only for that user ID** using a server-side lookup
-* There is no shared/global creative store exposed to the agent
-* The agent never iterates over or accesses other users’ data
-
-This design makes **cross-user data access technically impossible**.
+Key design rule:
+**User IDs never reach the LLM and are never exposed outside the API layer.**
 
 ---
 
-### 🔒 2. Why User IDs Never Reach the LLM
+## API Contract
 
-User identifiers are treated as **sensitive metadata** and are **never passed to the LLM**.
+### Endpoint
 
-* `X-USER-ID` is consumed only by backend tools (e.g., database fetch)
-* The LLM receives **only**:
+POST /qa
 
-  * Sanitized creative text
-  * The user’s natural-language query
-* No prompts, tool inputs, or system messages contain user IDs
+### Headers (MANDATORY)
 
-This enforces a strict **privacy boundary** between identity and model reasoning.
+X-USER-ID: <user_id>
 
----
-
-### 🧠 3. Hallucination Mitigation Strategy
-
-The agent is intentionally designed to limit hallucinations:
-
-1. **Grounded Context Only**
-   The LLM is prompted exclusively with creatives retrieved for the user.
-
-2. **No External Knowledge Calls**
-   The agent does not query the internet, vector databases, or external knowledge sources.
-
-3. **Intent Classification Guardrails**
-   User queries are classified before response generation, preventing unsupported behavior.
-
-4. **Deterministic Empty-State Handling**
-   If no creatives exist, the agent responds with a fixed message instead of guessing.
-
----
-
-### 📭 4. Behavior When No Creatives Exist
-
-If a user has no creatives stored:
-
-* The agent **does not fabricate content**
-* The response explicitly states that no creatives are available
-* The user is prompted to add creatives or try again later
-
-This ensures predictable, non-hallucinatory behavior.
-
----
-
-## Architecture Overview
-
-```
-Client
-  │
-  ▼
-FastAPI (/qa)
-  │
-  ▼
-Intent Classification Tool
-  │
-  ├─ IRRELEVANT / EMPTY → Safe Response
-  │
-  ▼
-Fetch User Creatives (User-Scoped)
-  │
-  ▼
-LLM Analysis (OpenRouter / OpenAI)
-  │
-  ▼
-Final Answer
-```
-
----
-
-## LLM Provider & API Key Handling
-
-The agent supports **either** OpenRouter or OpenAI keys:
-
-* `OPENROUTER_API_KEY` (preferred)
-* `OPENAI_API_KEY` (fallback)
-
-The system automatically uses whichever is present in the environment.
-
-❗ No `.env` file is auto-loaded. Keys must be set explicitly in the OS environment.
-
----
-
-## Execution Rules (Critical)
-
-The evaluator will run **only**:
-
-```bash
-python main.py
-```
-
-The project:
-
-* Does NOT rely on setup scripts
-* Does NOT auto-load `.env` or `.env.sample`
-* Starts cleanly with default FastAPI + Uvicorn behavior
-
-If the service does not start, the submission fails automatically.
-
----
-
-## Health Check
-
-```http
-GET /health
-```
-
-Returns:
+### Request Body (String Only)
 
 ```json
-{"status": "ok"}
+{
+  "query": "Is my creative clear for first‑time users?"
+}
+```
+
+### Response (String Only)
+
+```json
+{
+  "answer": "The creative communicates the message clearly but could improve the CTA."
+}
 ```
 
 ---
 
-## Example Request
+## Agent Flow (Step‑by‑Step)
+
+1. Input validation & sanitization
+2. Prompt‑injection and safety checks
+3. Intent classification via tool
+4. User‑scoped creative fetch tool
+5. Optional analysis tool execution
+6. Safe LLM invocation (if needed)
+7. Deterministic string response
+
+---
+
+## Tooling
+
+### Tool 1: fetch_user_creatives (MANDATORY)
+
+**Purpose**: Fetch creatives belonging only to the requesting user.
+
+**Guarantees**:
+
+* User ID used only internally
+* No cross‑user data access
+* Returned data is shape‑controlled
+
+### Tool 2: analyze_clarity (OPTIONAL)
+
+**Purpose**: Analyze clarity and CTA strength without LLM calls.
+
+**Triggered When**:
+
+* User asks for clarity, feedback, or improvements
+
+---
+
+## 🛡 Privacy & Safety Constraints (MANDATORY)
+
+### How cross‑user data access is prevented
+
+* User identity is read only from HTTP headers
+* All database queries are explicitly scoped by user_id
+* No shared/global creative access exists
+
+### Why user IDs never reach the LLM
+
+* User IDs are stripped at the API layer
+* LLM receives only:
+
+  * Sanitized user query
+  * User’s own creative content
+
+### How hallucinations are limited
+
+* Irrelevant or generic queries are blocked
+* Tool‑first reasoning is enforced
+* LLM is called only with grounded creative context
+
+### What happens if no creatives exist
+
+```json
+{
+  "answer": "You have no creatives yet. Please create one to receive feedback."
+}
+```
+
+No LLM call is made in this case.
+
+---
+
+## Testing the Application (Swagger UI)
+
+### Step‑by‑Step Validation
+
+1. Start the server:
 
 ```bash
-curl -X POST http://localhost:8000/qa \
-  -H "X-USER-ID: user_123" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What are my creatives?"}'
+python main.py
 ```
+
+2. Open Swagger UI:
+
+```
+http://localhost:8000/docs
+```
+
+3. Locate `POST /qa` and click **Try it out**
+
+4. Add Header:
+
+```
+X-USER-ID: user_123
+```
+
+5. Request Body:
+
+```json
+{
+  "query": "Is my creative clear?"
+}
+```
+
+6. Click **Execute**
+
+### Expected Result
+
+* Response references only the user’s creative
+* No cross‑user leakage
+* No hallucinated content
 
 ---
 
-## Final Notes
+## Environment Configuration
 
-* The agent is **privacy-safe by construction**
-* User data never leaks to the model
-* Hallucinations are actively constrained
-* The system is ready for direct evaluation and submission
+### .env.sample
 
+```
+OPENROUTER_API_KEY=your_key_here
+# OR
+OPENAI_API_KEY=your_key_here
+```
+
+The system works if **either** key is present.
+
+---
+
+## Execution Rule (CRITICAL)
+
+Only the following command is required:
+
+```bash
+python main.py
+```
+
+No setup scripts or manual steps are needed.
+
+---
+
+## Assumptions & Limitations
+
+**Assumptions**:
+
+* Each user owns their creatives
+* Creatives fit within LLM context
+
+**Limitations**:
+
+* Text‑only analysis
+* Mocked DB (replaceable)
+
+---
+
+## Production Readiness Summary
+
+✔ User isolation enforced
+✔ Tool‑based reasoning
+✔ No user ID leakage
+✔ Prompt‑injection protection
+✔ Deterministic responses
+✔ Assignment‑compliant execution
+
+---
+
+This README + User Guide together form the **Enterprise SOP / Runbook** for this service.
