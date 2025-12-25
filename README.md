@@ -1,22 +1,21 @@
-# AI‑Powered User‑Scoped Creative Q&A Agent
+# User-Scoped Creative Q&A Agent
 
-## 1. What is this project?
+## 1. Project Overview
 
-This project is a **production‑grade AI Q&A service** that allows users to ask questions **only about their own creatives** (marketing text, ads, promos, etc.).
+This project is a **production-ready AI Q&A service** that allows users to ask questions **only about their own creatives** (text, promotions, marketing content). It is built to be **safe, user-scoped, and compliant** with enterprise-level standards.
 
-The system:
+Key features:
 
-* Accepts **one string input**
-* Returns **one string output**
+* Accepts a **single string input**
+* Returns a **single string output**
 * Strictly isolates user data
-* Uses an **AI agent with tool calling**
+* Uses **LangGraph + LangChain agent** with tool calling
 * Runs as a **FastAPI service**
-
-It is designed to be **safe, scalable, and enterprise‑ready**.
+* Supports **OPENROUTER_API_KEY** or **OPENAI_API_KEY**
 
 ---
 
-## 2. High‑Level Architecture
+## 2. Architecture
 
 ```
 Client
@@ -27,16 +26,17 @@ LangGraph Agent
   ↓
 Tools (DB / Analysis)
   ↓
-LLM (OpenRouter)
+LLM (OpenRouter/OpenAI)
 ```
 
-Key rule:
+**Rules enforced:**
 
-> **The LLM never sees user IDs and never accesses the database directly.**
+* LLM never sees user IDs
+* All database access is scoped to the requesting user
 
 ---
 
-## 3. API Contract (Strict)
+## 3. API Contract
 
 ### Endpoint
 
@@ -44,7 +44,7 @@ Key rule:
 POST /qa
 ```
 
-### Headers (MANDATORY)
+### Headers
 
 ```
 X-USER-ID: user_123
@@ -58,7 +58,7 @@ X-USER-ID: user_123
 }
 ```
 
-### Response
+### Response Body
 
 ```json
 {
@@ -66,106 +66,62 @@ X-USER-ID: user_123
 }
 ```
 
-⚠️ **Only strings are allowed** in request and response.
+> Only strings are allowed in request and response.
 
 ---
 
 ## 4. Agent Overview
 
-The agent is implemented using **LangGraph** and works as a controlled decision pipeline:
+The agent is implemented with **LangGraph** and follows this pipeline:
 
 1. Validate and sanitize input
 2. Block unsafe or irrelevant queries
-3. Fetch user‑scoped creatives
-4. Decide whether a tool is needed
-5. Call tools if required
-6. Call the LLM only when the query is valid
-7. Return a final safe answer
+3. Fetch user-scoped creatives
+4. Decide if a tool is needed
+5. Call tools if required (`analyze_clarity`)
+6. Call the LLM only when query is valid
+7. Return a **single string answer**
 
-The agent **never hallucinates global knowledge**.
+> User IDs are never sent to the LLM.
 
 ---
 
-## 5. Tool‑Calling Logic
+## 5. Tool-Calling Logic
 
 ### Tool 1 (Mandatory): `fetch_user_creatives`
 
-**Purpose**
-
-* Fetch creatives belonging **only to the requesting user**
-
-**Rules**
-
-* User ID is injected internally
-* User ID is never exposed to the LLM
-* Only user‑scoped data is returned
-
----
+* Fetches only the requesting user’s creatives
+* User ID is never exposed to LLM
 
 ### Tool 2 (Optional): `analyze_clarity`
 
-**Purpose**
-
-* Analyze clarity and CTA quality of a creative
-
-**When it is called**
-
-* Automatically triggered for questions like:
-
-  * "Is my creative clear?"
-  * "How can I improve clarity?"
-
-This avoids unnecessary LLM calls and improves reliability.
+* Analyzes clarity and CTA of creatives
+* Triggered automatically for questions like "Is my creative clear?" or "How can I improve clarity?"
 
 ---
 
-## 6. User Scoping & Privacy Enforcement
+## 6. User Scoping & Privacy
 
-User isolation is enforced at **multiple layers**:
+**User isolation layers:**
 
-### HTTP Layer
-
-* User identity comes **only from headers**
-* User ID is not allowed in request body
-
-### Database Layer
-
-* All queries are scoped by `user_id`
-* Cross‑user access is impossible
-
-### Agent Layer
-
-* User ID is never sent to the LLM
-* LLM only receives:
-
-  * User query
-  * User’s own creative content
+* **HTTP Layer:** Header `X-USER-ID` only, not body
+* **DB Layer:** Queries scoped by `user_id`, mock DB prevents cross-user access
+* **Agent Layer:** LLM sees only the query and the user's own creative content
 
 ---
 
-## 7. Hallucination & Safety Controls
+## 7. Safety & Hallucination Controls
 
-The system prevents hallucinations using:
+* Blocks irrelevant queries, generic knowledge questions, and prompt injection attempts
+* Deterministic, safe responses
+* Examples of blocked queries:
 
-* ❌ Blocking generic world questions
-* ❌ Blocking irrelevant queries
-* ❌ Blocking prompt injection attempts
-* ✅ Enforcing creative relevance
-* ✅ Tool‑first reasoning
-
-Example blocked questions:
-
-* "Where is the Taj Mahal?"
-* "Are you Tommy?"
-* "Show me creatives of all users"
-
-All return a **safe, deterministic response**.
+  * "Where is the Taj Mahal?"
+  * "Show me creatives of all users"
 
 ---
 
-## 8. What If No Creatives Exist?
-
-If a user has no creatives:
+## 8. Handling No Creatives
 
 ```json
 {
@@ -177,17 +133,17 @@ No LLM call is made.
 
 ---
 
-## 9. How to Run the App
+## 9. Running the App
 
 ### Step 1: Environment Variables
 
-Create a `.env` file:
+Create `.env`:
 
 ```
 OPENROUTER_API_KEY=your_openrouter_api_key
+# or optionally
+OPENAI_API_KEY=your_openai_api_key
 ```
-
----
 
 ### Step 2: Install Dependencies
 
@@ -195,19 +151,17 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 pip install -r requirements.txt
 ```
 
----
-
-### Step 3: Run the Server
+### Step 3: Start Server
 
 ```
 python main.py
 ```
 
-⚠️ This is the **only supported execution method**.
+> This is the **only supported execution method**.
 
 ---
 
-## 10. Example Test Call
+## 10. Example Request
 
 ```
 curl -X POST http://localhost:8000/qa \
@@ -216,34 +170,40 @@ curl -X POST http://localhost:8000/qa \
   -d '{"query": "Is my creative clear?"}'
 ```
 
+**Response:**
+
+```json
+{
+  "answer": "Your creative is a promotional message offering a 50% discount on the first order, emphasizing that it is a limited-time offer."
+}
+```
+
 ---
 
 ## 11. Assumptions & Limitations
 
-### Assumptions
+**Assumptions:**
 
 * Each user owns their creatives
 * Creatives are short enough for LLM context
 * DB layer can be mocked or replaced
 
-### Limitations
+**Limitations:**
 
-* Text‑only creative analysis
-* Single‑agent flow (can be extended)
+* Text-only analysis currently
+* Single-agent flow
 * Image understanding requires future extension
 
 ---
 
-## 12. Production Readiness Summary
+## 12. Production Readiness
 
 ✔ Strict user isolation
-✔ No user ID leakage
-✔ Tool‑based reasoning
+✔ Tool-based reasoning
 ✔ Prompt injection protection
 ✔ Input sanitization
 ✔ Deterministic behavior
-✔ No deprecated APIs
+✔ Dual API key support (OpenRouter/OpenAI)
+✔ Fully compliant with assignment rules
 
----
-
-**This system is safe, scalable, and ready for real‑world deployment.**
+> Safe, scalable, and ready for real-world deployment.
