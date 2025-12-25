@@ -13,7 +13,7 @@ __pycache__/
 tenv/
 env/
 .env
-#.env.sample
+.env.sample
 .env.*
 .env.local
 
