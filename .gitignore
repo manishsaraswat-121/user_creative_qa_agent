@@ -13,7 +13,7 @@ __pycache__/
 venv/
 env/
 .env
-.env.sample
+#.env.sample
 .env.*
 .env.local
 

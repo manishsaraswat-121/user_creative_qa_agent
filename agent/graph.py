@@ -1,131 +1,172 @@
 import os
+import re
 import logging
 from pathlib import Path
+from typing import Dict
+
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph
-from agent.tools import fetch_user_creatives, analyze_clarity
-from agent.prompt import SYSTEM_PROMPT
+
+from agent.tools import (
+    fetch_user_creatives,
+    analyze_clarity,
+    classify_user_intent,
+)
+from agent.prompt import (
+    SYSTEM_PROMPT,
+    IRRELEVANT_QUERY_RESPONSE,
+    EMPTY_QUERY_RESPONSE,
+)
 
 logger = logging.getLogger("creative-qa-agent.agent")
 
-# Forbidden patterns for global/out-of-scope queries
-FORBIDDEN_PATTERNS = [
-    "all users", "other users", "everyone", "every user",
-    "other creatives", "show me all", "list users"
-]
 
-# Generic knowledge keywords
-GENERIC_KEYWORDS = ["where", "when", "who", "capital", "country", "city", "history", "population"]
+# -------------------------
+# Security & Safety Guards
+# -------------------------
 
-# Prompt injection patterns
 PROMPT_INJECTION_PATTERNS = [
     "ignore previous instructions",
     "forget your rules",
     "reveal other users",
     "execute code",
     "system prompt",
+    "api key",
     "openai key",
-    "api key"
 ]
 
-# Keywords to determine if a query is creative-related
-CREATIVE_KEYWORDS = [
-    "creative", "ad", "promo", "design", "image", "text", "message", "clarity", "cta"
-]
+MAX_QUERY_LENGTH = 500
 
 
-logger = logging.getLogger("creative-qa-agent.agent")
+# -------------------------
+# Environment / LLM Setup
+# -------------------------
 
-def get_llm():
+def load_env():
     """
-    Initialize and return a ChatOpenAI LLM instance using OpenRouter.
-    Loads the API key from environment or .env.sample file.
-    Handles cases when main.py and graph.py are in different directories.
+    Load .env.sample explicitly to support Windows & multi-folder layouts.
     """
-    # Determine project root (assuming main.py is at root)
-    project_root = Path(__file__).parent.parent  # agent/graph.py -> project root
-    env_path = project_root / ".env.sample"       # explicit .env.sample path
+    project_root = Path(__file__).parent.parent
+    env_path = project_root / ".env.sample"
 
     if env_path.exists():
         load_dotenv(dotenv_path=env_path)
         logger.info(f".env.sample loaded from {env_path}")
     else:
-        logger.warning(f"No .env.sample file found at {env_path}")
+        logger.warning(f".env.sample not found at {env_path}")
 
-    # Fetch API key from environment variables
+
+def get_llm() -> ChatOpenAI:
+    """
+    Initialize ChatOpenAI using OpenRouter or OpenAI.
+    """
+    load_env()
+
     api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
 
     if not api_key:
-        logger.error("No API key found! Set OPENROUTER_API_KEY in .env.sample or environment.")
+        logger.critical("No API key found in environment variables")
         raise ValueError("OPENROUTER_API_KEY or OPENAI_API_KEY is required")
 
     return ChatOpenAI(
         model="openai/gpt-4o-mini",
         openai_api_key=api_key,
-        openai_api_base="https://openrouter.ai/api/v1"
+        openai_api_base="https://openrouter.ai/api/v1",
+        temperature=0.2,
     )
 
 
+# -------------------------
+# Utilities
+# -------------------------
+
+def sanitize_query(query: str) -> str:
+    query = query.strip()
+    query = re.sub(r"\s+", " ", query)
+    return query[:MAX_QUERY_LENGTH]
+
+
+def is_prompt_injection(query: str) -> bool:
+    q = query.lower()
+    return any(pattern in q for pattern in PROMPT_INJECTION_PATTERNS)
+
+
+# -------------------------
+# Agent Orchestration
+# -------------------------
+
 def run_agent(user_id: str, user_query: str) -> str:
     """
-    Run the QA agent for a specific user and query.
-    Handles tool calling, out-of-scope checks, relevance checks, and LLM responses.
+    Main entry point for the Creative QA Agent.
     """
     llm = get_llm()
+    query = sanitize_query(user_query)
 
-    def agent_node(state):
-        query_lower = user_query.lower()
+    def agent_node(state: Dict):
+        # 1️⃣ Hard security check (non-negotiable)
+        if is_prompt_injection(query):
+            logger.warning(f"Prompt injection blocked for user={user_id}")
+            return {
+                "answer": "Your request appears unsafe. Please ask a question only about your own creatives."
+            }
 
-        # 1️⃣ Prompt injection detection
-        if any(pattern in query_lower for pattern in PROMPT_INJECTION_PATTERNS):
-            logger.warning(f"Prompt injection attempt blocked for user {user_id}: {user_query}")
-            return {"answer": "Your query appears unsafe. Please ask a question only about your own creatives."}
+        # 2️⃣ Intent classification (LLM as tool)
+        intent_result = classify_user_intent.run(query)
+        intent = intent_result.get("intent")
 
-        # 2️⃣ Forbidden/global patterns
-        if any(p in query_lower for p in FORBIDDEN_PATTERNS):
-            return {"answer": "I can only answer questions about your own creatives. Please ask a relevant question."}
+        logger.info(f"Intent detected: {intent}")
 
-        # 3️⃣ Generic knowledge check
-        if any(word in query_lower for word in GENERIC_KEYWORDS):
-            return {"answer": "Please ask a question related to your own creatives only."}
+        if intent == "EMPTY_OR_INVALID":
+            return {"answer": EMPTY_QUERY_RESPONSE}
 
-        # 4️⃣ Fetch user's creatives
+        if intent == "IRRELEVANT":
+            return {"answer": IRRELEVANT_QUERY_RESPONSE}
+
+        # 3️⃣ Fetch user-scoped creatives (never exposed to LLM)
         creatives = fetch_user_creatives.run(user_id)
+
         if not creatives:
-            return {"answer": "You have no creatives yet. Please create one to ask questions about it."}
+            return {
+                "answer": "You do not have any creatives yet. Please create one to receive feedback."
+            }
 
-        creative_text = creatives[0].get("creative_text", "")
+        creative_text = creatives[0].get("creative_text", "").strip()
 
-        # 5️⃣ Tool-based clarity analysis
-        if "clear" in query_lower or "clarity" in query_lower:
+        if not creative_text:
+            return {"answer": "Your creative appears to be empty."}
+
+        # 4️⃣ Tool-based feedback flow
+        if intent == "CREATIVE_FEEDBACK":
             return {"answer": analyze_clarity.run(creative_text)}
 
-        # 6️⃣ Relevance check: must be creative-related
-        if not any(word in query_lower for word in CREATIVE_KEYWORDS):
-            logger.info(f"Irrelevant query blocked for user {user_id}: {user_query}")
-            return {"answer": "I can only answer questions about your own creatives. Please ask a relevant question."}
-
-        # 7️⃣ LLM invocation (safe)
+        # 5️⃣ Creative Q&A via LLM (safe context)
         try:
-            response = llm.invoke([
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=f"User question: {user_query}"),
-                HumanMessage(content=f"User creative: {creative_text}")
-            ])
-            answer = response.content or "I could not generate a response."
-        except Exception as e:
-            logger.error(f"LLM call failed for user {user_id}", exc_info=e)
-            answer = "There was an error generating the response."
+            response = llm.invoke(
+                [
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    HumanMessage(content=f"Creative:\n{creative_text}"),
+                    HumanMessage(content=f"User Question:\n{query}"),
+                ]
+            )
+            return {"answer": response.content or "I could not generate a response."}
 
-        return {"answer": answer}
+        except Exception as exc:
+            logger.error(
+                f"LLM invocation failed for user={user_id}", exc_info=exc
+            )
+            return {
+                "answer": "There was an internal error while generating the response."
+            }
 
-    # Build and compile the state graph
+    # -------------------------
+    # LangGraph Wiring
+    # -------------------------
+
     graph = StateGraph(dict)
     graph.add_node("agent", agent_node)
     graph.set_entry_point("agent")
     app = graph.compile()
 
-    # Invoke the agent and return the final answer
     return app.invoke({})["answer"]
