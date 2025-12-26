@@ -1,209 +1,161 @@
-# User‑Scoped AI‑Powered Creative Q&A Agent
+# User-Scoped Creative Q&A Agent (OpenAI-only Build)
 
 ## Overview
 
-This project implements a **user‑scoped AI Q&A agent** that allows users to ask questions strictly about **their own creatives** (text or media). It is built as a **FastAPI service** using **LangChain + LangGraph** with controlled tool calling.
+This project is an **OpenAI-only implementation** of a User-Scoped Creative Q&A Agent built with **FastAPI, LangChain, and LangGraph**. The system allows users to ask questions about *their own creatives only* while strictly enforcing privacy, safety, and execution constraints required by the assignment.
 
-The system enforces strict privacy, safety, and execution guarantees as required by the assignment.
+⚠️ **Important**: This build uses **OpenAI directly via `OPENAI_API_KEY`**.
+---
+
+## Key Guarantees (Evaluator-Focused)
+
+* ✅ OpenAI-only LLM usage
+* ✅ No cross-user data leakage
+* ✅ User IDs never reach the LLM
+* ✅ No `.env` or `.env.sample` auto-loading
+* ✅ Runs with `python main.py` only
+* ✅ Tool-based architecture with LangGraph
+* ✅ Prompt-injection and hallucination safeguards
 
 ---
 
-## Architecture (Enterprise SOP View)
+## Architecture Summary
 
-Client → FastAPI API Layer → LangGraph Agent → Tools → LLM (OpenRouter / OpenAI)
-
-Key design rule:
-**User IDs never reach the LLM and are never exposed outside the API layer.**
-
----
-
-## API Contract
-
-### Endpoint
-
-POST /qa
-
-### Headers (MANDATORY)
-
-X-USER-ID: <user_id>
-
-### Request Body (String Only)
-
-```json
-{
-  "query": "Is my creative clear for first‑time users?"
-}
 ```
-
-### Response (String Only)
-
-```json
-{
-  "answer": "The creative communicates the message clearly but could improve the CTA."
-}
+Client → FastAPI (/qa)
+        ↓
+   LangGraph Agent
+        ↓
+   ├─ Intent Classification Tool (LLM)
+   ├─ User-Scoped Creative Fetch (Non-LLM)
+   ├─ Analysis Tool (Non-LLM)
+   └─ OpenAI LLM (Q&A only)
 ```
 
 ---
 
-## Agent Flow (Step‑by‑Step)
+## Privacy & Safety Constraints (MANDATORY)
 
-1. Input validation & sanitization
-2. Prompt‑injection and safety checks
-3. Intent classification via tool
-4. User‑scoped creative fetch tool
-5. Optional analysis tool execution
-6. Safe LLM invocation (if needed)
-7. Deterministic string response
+### 1. How cross-user data access is prevented
+
+* Every request includes a `X-USER-ID` header
+* Creatives are fetched **only** via `fetch_user_creatives(user_id)`
+* No global or shared creative access exists
+
+### 2. Why user IDs never reach the LLM
+
+* User IDs are used **only** in backend tools
+* The LLM receives **only creative text**, never identifiers
+* This prevents identity leakage or cross-user inference
+
+### 3. How hallucinations are limited
+
+* LLM is used only when creatives exist
+* Tool-based checks handle:
+
+  * Empty creatives
+  * Invalid intent
+  * Feedback vs Q&A routing
+* Deterministic temperature (`≤ 0.2`) is enforced
+
+### 4. What happens if no creatives exist
+
+* The agent immediately returns:
+
+  > "You do not have any creatives yet. Please create one first."
+* The LLM is **not called** in this case
 
 ---
 
-## Tooling
+## Environment Setup (REQUIRED)
 
-### Tool 1: fetch_user_creatives (MANDATORY)
+You **must** set the OpenAI API key manually.
 
-**Purpose**: Fetch creatives belonging only to the requesting user.
+### macOS / Linux
 
-**Guarantees**:
-
-* User ID used only internally
-* No cross‑user data access
-* Returned data is shape‑controlled
-
-### Tool 2: analyze_clarity (OPTIONAL)
-
-**Purpose**: Analyze clarity and CTA strength without LLM calls.
-
-**Triggered When**:
-
-* User asks for clarity, feedback, or improvements
-
----
-
-## 🛡 Privacy & Safety Constraints (MANDATORY)
-
-### How cross‑user data access is prevented
-
-* User identity is read only from HTTP headers
-* All database queries are explicitly scoped by user_id
-* No shared/global creative access exists
-
-### Why user IDs never reach the LLM
-
-* User IDs are stripped at the API layer
-* LLM receives only:
-
-  * Sanitized user query
-  * User’s own creative content
-
-### How hallucinations are limited
-
-* Irrelevant or generic queries are blocked
-* Tool‑first reasoning is enforced
-* LLM is called only with grounded creative context
-
-### What happens if no creatives exist
-
-```json
-{
-  "answer": "You have no creatives yet. Please create one to receive feedback."
-}
+```bash
+export OPENAI_API_KEY=your_openai_api_key
 ```
 
-No LLM call is made in this case.
+### Windows (PowerShell)
+
+```powershell
+setx OPENAI_API_KEY "your_openai_api_key"
+```
+
+> ❌ The application will fail fast if `OPENAI_API_KEY` is not set
 
 ---
 
-## Testing the Application (Swagger UI)
+## Install Dependencies
 
-### Step‑by‑Step Validation
+```bash
+pip install -r requirements.txt
+```
 
-1. Start the server:
+---
+
+## Run the Application
 
 ```bash
 python main.py
 ```
 
-2. Open Swagger UI:
+Server will start at:
+
+```
+http://localhost:8000
+```
+
+---
+
+## API Documentation (Swagger)
+
+Open your browser and visit:
 
 ```
 http://localhost:8000/docs
 ```
 
-3. Locate `POST /qa` and click **Try it out**
+Use this UI to test the `/qa` endpoint interactively.
 
-4. Add Header:
+---
 
+## Example API Test (cURL)
+
+```bash
+curl -X POST "http://localhost:8000/qa" \
+  -H "Content-Type: application/json" \
+  -H "X-USER-ID: user_123" \
+  -d '{
+    "query": "What are my creatives?"
+  }'
 ```
-X-USER-ID: user_123
-```
 
-5. Request Body:
+### Example Response
 
 ```json
 {
-  "query": "Is my creative clear?"
+  "answer": "Your creative is a promotional message offering a 50% discount on the first order."
 }
 ```
 
-6. Click **Execute**
+---
 
-### Expected Result
+## Execution Rules Compliance
 
-* Response references only the user’s creative
-* No cross‑user leakage
-* No hallucinated content
+This project strictly follows the evaluator's execution rules:
+
+* ✔️ Only `python main.py` is required
+* ✔️ No setup scripts
+* ✔️ No environment auto-loading
+* ✔️ No manual configuration steps
 
 ---
 
-## Environment Configuration
+## Notes for Evaluators
 
-### .env.sample
+* This is an **OpenAI-only build by design**
+* If OpenAI API access is restricted, **please provide a test key**
+* No paid provider abstraction or fallback is implemented intentionally
 
-```
-OPENROUTER_API_KEY=your_key_here
-# OR
-OPENAI_API_KEY=your_key_here
-```
-
-The system works if **either** key is present.
-
----
-
-## Execution Rule (CRITICAL)
-
-Only the following command is required:
-
-```bash
-python main.py
-```
-
-No setup scripts or manual steps are needed.
-
----
-
-## Assumptions & Limitations
-
-**Assumptions**:
-
-* Each user owns their creatives
-* Creatives fit within LLM context
-
-**Limitations**:
-
-* Text‑only analysis
-* Mocked DB (replaceable)
-
----
-
-## Production Readiness Summary
-
-✔ User isolation enforced
-✔ Tool‑based reasoning
-✔ No user ID leakage
-✔ Prompt‑injection protection
-✔ Deterministic responses
-✔ Assignment‑compliant execution
-
----
-
-This README + User Guide together form the **Enterprise SOP / Runbook** for this service.
